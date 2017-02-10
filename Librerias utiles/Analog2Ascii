@@ -1,0 +1,23 @@
+#pragma XINST off;
+unsigned int voltaje;
+
+void interrupt alta_prioridad(void){
+ADIF=0;
+dao=ADRESH;
+GO_DONE=1;
+}
+
+void main(void){
+ADCON0=0b00000100;
+ADCON1=0,
+ADCON2=0b00010001;
+ADON=1;
+
+ADIF=0;
+ADIE=1;
+GIEH=1;
+IPEN=1;
+
+GO_DONE=1;
+for(;;);
+}
