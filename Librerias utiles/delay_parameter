@@ -1,0 +1,21 @@
+void delay(int timeParameter)
+{
+    /*Configuration of the timer to run as properly for our application 
+     Timer enabled
+     8-bit timer configured
+     Internal instruction cycle clock
+     low-to-high transition
+     prescaler assigned
+     1:8 prescaler value (to get 4 micro-seconds for every change in the timer)*/
+    T0CON = 0xC2;
+    TMR0L = 6; //Timer start value 
+    
+    /*It creates a loop to give the user the flexibility of choosing a time for the delay.
+     Knowing that one loop, or timeParameter = 1, is a 1ms delay*/
+    for(int counter = 1; counter <= timeParameter; counter++)
+    {
+       do{}while(TMR0IF == 0); //Wait until the flag is enabled (polling) 
+        TMR0IF = 0;             //and then disable it 
+    }
+    TMR0ON = 0; //disable the timer
+}
