@@ -1,0 +1,104 @@
+#include <xc.h>
+#pragma config XINST = OFF //Extended Instruction Set (disabled)
+
+#define FIRST_POSITION_RIGHT 0x80; //Defining the first position for spining to the right
+#define FIRST_POSITION_LEFT 0x10; //Defining the first position for spining to the left
+
+unsigned char voltageParameter;
+unsigned char position = FIRST_POSITION_RIGHT; //First position assigned to the variable position (default: right)
+unsigned char delay = 0;
+
+void delay(unsigned char voltageParameter)
+{
+    /*Configuration of the timer to run as properly for our application 
+     Timer enabled
+     16-bit timer configured
+     Internal instruction cycle clock
+     low-to-high transition
+     prescaler assigned
+     1:2 prescaler value (to get 1 micro-seconds for every change in the timer)*/
+    T0CON = 0x80;
+    
+    /*This is used to convert the information that the A/D convertor gives us into a time parameter
+    that we can use in the timer*/
+    unsigned int timeParameter = 1000 + (unsigned int)voltageParameter*220/255;
+    
+    while(TMR0 <= timeParameter){} //Wait until the timer register reaches the time parameter (1ms to 1.22ms)
+
+    TMR0ON = 0; //disable the timer
+    TMR0 = 0; //Start the timer from zero the next time 
+}
+
+void interrupt lowPriority (void)
+{
+    ADIF = 0; //Clean the A/D flag to wait for the next conversion
+   
+    /*If the stepper has done a full spin assign the last value and 
+    reset the position*/
+    if(position == 0x10)
+    {
+        PORTC = 0x90;
+        delay(ADRESH);
+        position = FIRST_POSITION_RIGHT;
+    }
+    PORTC = position; //Assigning full step
+    delay(ADRESH);
+    position /= 2;
+    PORTC = position*3; //Assigning half step
+    delay(ADRESH);
+    GO_DONE = 1; //Start the conversion again
+}
+
+void main(void) {
+    /*------------------ Port configuration ----------------------------------*/
+    ANSEL1 = 0; //Port A1 configured as a digital port 
+    TRISC = 0x00; //Every pin of the C port is an output (outputs for stepper RC7, RC6, RC5, RC4)
+    TRISA1 = 1; //RA1 as input (button for changing the direction)
+    TRISA2 = 1; //RA2 as input and analogic input (it is not necessary to assign ANSEL2 = 1 
+                //because it is analogic by default) (variable resistor)
+    
+    /*----------------------------- Timer0 configuration ------------------------------------------*/
+    /*Configuration of the timer to run as properly for our application 
+     Timer disabled
+     16-bit timer configured
+     Internal instruction cycle clock
+     low-to-high transition
+     prescaler assigned
+     1:2 prescaler value (to get 1 micro-seconds for every change in the timer)*/
+    T0CON = 0;  
+    
+    /*------------------------------- A/D converter ---------------------------------------*/
+    /*Configuration of the A/D control register 0
+     bit 7: unimplemented 
+     bit 6-2: AN2 as analog channel
+     bit 1: GO/DONE = 0 (Conversion status as 0)
+     bit 0: ADON (A/D converter turned off)*/
+    ADCON0 = 0x08; 
+    /*Configuration of the A/D control register 1
+     bit 7-6: Special trigger (default 00)
+     bit 5-4: Positive reference voltage (AVDD)
+     bit 3: Negative reference voltage (AVSS)
+     bit 2-0: Analog negative channel (AVSS)*/
+    ADCON1 = 0;
+    /*Configuration of the A/D control register 2
+     bit 7: Left justified (we do not want a big resolution so in 8 bits is possible to store the data)
+     bit 6: unimplemented (0)
+     bit 5-3: Acquisition time (12TAD = 3 us) this is to get something near the minimum acquisition time (2.45us)
+     bit 2-0: Conversion clock (Fosc/2 = 4MHz o TAD = 250ns)*/
+    ADCON2 = 0x28; 
+    
+    /*---------------------- Interrupt configuration ----------------------------------------------------*/
+    IPEN = 1; //Enables priority levels 
+    GIEH = 1; //Enables high-priority interrupts 
+    ADIE = 1; //Enables A/D converter interrupt 
+    ADIP = 0; //Set as low-priority the A/D converter interrupt
+    ADIF = 0; //Clean the flag of the A/D (just precaution)
+    TMR0IE = 1; //Enables timer0 interrupt
+    TMR0IP = 1; //Set as high-priority the timer0 interrupt
+    
+    /*Initialize the A/D convertor and the timer0*/
+    ADON = 1;
+    GO_DONE = 1;
+    
+    while(1){} //Infinite loop to stay in the main 
+}
