@@ -75,7 +75,7 @@ void main(void) {
         {
             soft_flag=0; //Apaga bandera de software
             j=0; //Reinicia el contador de la bandera
-            if(RB5==0) //Si el boton no se presiona gira a la derecha 
+            if(RB5==0) //Si el boton se presiona gira a la derecha 
             {
                 PORTB=secuencia[i]; //Asigna la secuencia 
                 i++; //Avanza en la secuencia 
@@ -85,7 +85,7 @@ void main(void) {
                     i=0;   
                 }
             }
-            else //Si el boton esta presionado gira a la izquierda
+            else //Si el boton no esta presionado gira a la izquierda
             {
                 PORTB=secuencia[i]; //Asigna la secuencia 
                 i--; //Retrocede en el array
