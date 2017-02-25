@@ -1,0 +1,100 @@
+/*
+ * File:   newmain.c
+ * Author: David Olide
+ *
+ * Created on 3 de febrero de 2017, 12:16 PM
+ */
+//512 pulsos por reveolución
+
+#include <xc.h>
+#include"pic18f25k80.h"
+#include"configuration_bits.h"
+
+unsigned int secuencia[]={0x07, 0x03, 0x0B, 0x09, 0x0D, 0x0C, 0x0E, 0x06}; //Secuencia para el motor a pasos 
+unsigned char i=0; 
+unsigned char j=0; //Contador para bandera
+unsigned char soft_flag=0; //Bandera de software
+unsigned char voltaje; 
+
+void high_priority interrupt delay(void){
+
+    if(TMR0IE&&TMR0IF)
+    {
+        TMR0IF=0; //Apaga la bandera del Timer0
+        TMR0L=44; //Carga el Timer0 con 44
+        GO_DONE=1; //Inicia la conversion del ADC
+        j++;
+        if(j>=(3+voltaje*3/255)) //Tiempo minimo de 600us por paso, 600us*4096 pasos=2.4576 segundos por revolución velocidad máxima
+        {
+        soft_flag=1; //Prende bandera de software
+        }
+    }
+    if(ADIE&&(ADIF))
+    {
+        ADIF=0; //Apaga la bandera del ADC
+        voltaje=ADRESH; //Asigna el valor del ADRESH en una variable para usarla en el Tiemer0
+    }
+}
+
+void init(void)
+{
+    GIE=1; //Habilita interrupciones globales 
+    IPEN=1;	//Habilita niveles de interrupcion
+
+    TMR0IP=1; //Configura prioridad alta para TRM0
+    TMR0IE=1; //Habilita interrupción para TMR0
+    TMR0IF=1; //OVERFLOW
+    
+    T0CON=0xC0; //2:1, 200us para la interrupción
+    TMR0L=44; //Primer valor en el Timer0
+
+    
+    ANSEL8=0; //RB1 como puerto digital
+    ANSEL10=0; //RB0 como puerto digital 
+    ANSEL9=1; //RB4 como analogico (prevencion)
+    
+
+    
+    ADIF=1; //CONVERTION COMPLETED
+    ADIE=1; //ENABLE INTERRUPT
+    ADIP=0; //0=LOW PRIORITY, 1=HIGH PRIORITY
+    ADCON0=0b00100100; //Channel 09(AN9), convesion disabled, module shut off
+    ADCON1=0; //VREF+ = AVdd, VREF- = AVss, Channel 00 (AVss) as analog negative
+    ADCON2=0b00001001; //Left justified, 2TAD, Fosc/8
+    ADON=1; //PRENDER ADC
+
+    TRISB=0xF0; //input (RB7, RB6, RB5, RB4) output (RB3, RB2, RB1, RB0)
+}
+    
+void main(void) {
+    init(); //Cofiguracion general del pic
+    while(1)
+    {
+        //Ejecuta cuando la bandera de software se prende
+        if(soft_flag==1)
+        {
+            soft_flag=0; //Apaga bandera de software
+            j=0; //Reinicia el contador de la bandera
+            if(RB5==0) //Si el boton no se presiona gira a la derecha 
+            {
+                PORTB=secuencia[i]; //Asigna la secuencia 
+                i++; //Avanza en la secuencia 
+                //Cuando llega al final del array inicia el contador 
+                if(i>=7) 
+                {
+                    i=0;   
+                }
+            }
+            else //Si el boton esta presionado gira a la izquierda
+            {
+                PORTB=secuencia[i]; //Asigna la secuencia 
+                i--; //Retrocede en el array
+                ///Cuando llega al inicio del array inicia el contador
+                if(i<=0)
+                {
+                    i=7;   
+                }
+            }
+        }
+    }
+}
