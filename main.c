@@ -16,13 +16,17 @@
 unsigned int secuencia[]={0x07, 0x03, 0x0B, 0x09, 0x0D, 0x0C, 0x0E, 0x06};
 unsigned char i=0;
 unsigned char j=0;
-unsigned char k=0,l=0;
+unsigned char k=0,l=0,m=0;
 unsigned char isr=0;
-unsigned char voltaje,conv=0,conv2=0,g=0;
+unsigned char voltaje,conv=0,conv2=0;
+unsigned char g=0;
 unsigned char rx[]={"               "};
+
+unsigned char done[]={"DONE\n"}; 
 //unsigned char p[]{"               "}
 unsigned char ccw=1,on=0,terminoEvaluacion=0;
-int rps=0,grados=0;
+int rps=0;
+int grados=0;
 //////
 
 void high_priority interrupt delay(void){
@@ -60,10 +64,17 @@ void low_priority interrupt adc(void){
         ADIF=0;
 
         voltaje=ADRESH;
-
-        
-
     }
+//	if ((TX1IE==1) && (TX1IF==1))
+//	{
+//		TX1IF=0;
+//    		TXREG1=mensaje[m++];
+//		if (mensaje[m]==0)  
+//		{
+//			TX1IE=0;
+//			
+//		}     		
+//	}   
         
 }
 
@@ -75,10 +86,11 @@ void init(void)
     BAUDCON1=0b00000000;
     RC1IE = 1;
     RC1IP = 1;
-    //TX1IE = 1;
+    //TX1IE = 0;
     //TX1IP = 1;
     SPBRG1 = 12;
     RC1IF=1;
+    //TX1IF=0;
 
 
     
@@ -121,16 +133,37 @@ void getDatos(void)
     if(rx[0]=='T'&&rx[1]=='E'&&rx[2]=='M'&&rx[3]=='P'&&rx[4]=='L'&&rx[5]=='I'&&rx[6]=='M'&&rx[7]=='I'&&rx[8]=='T')
     {
         on=1;
+
         conv2=1;
     }
     if(rx[0]=='O'&&rx[1]=='N')
     {
         on=1;
+        m=0;
+        while(m<6)
+        {
+            if(TXIF==1)
+            {
+                TXIF=0;
+                TXREG1=done[m++];
+            }
+        }  
         conv2=1;
+        
+   
     }
     if(rx[0]=='O'&&rx[1]=='F'&&rx[2]=='F'&&on==1)
     {
         on=0;
+        m=0;
+        while(m<6)
+        {
+            if(TXIF==1)
+            {
+                TXIF=0;
+                TXREG1=done[m++];
+            }
+        }         
         conv2=1;
     }
     if(rx[0]=='R'&&rx[1]=='P'&&rx[2]=='S'&&rx[3]==':')
@@ -141,7 +174,18 @@ void getDatos(void)
                 rps=rps+(rx[5]-48)*10;
                 rps=rps+(rx[7]-48);
                 rps=732/rps;
-            conv2=1;   
+                
+                        m=0;
+        while(m<6)
+        {
+            if(TXIF==1)
+            {
+                TXIF=0;
+                TXREG1=done[m++];
+            }
+        }
+                        
+                conv2=1;   
             }
     
             if(rx[5]=='.')
@@ -149,15 +193,37 @@ void getDatos(void)
                 rps=(rx[4]-48)*10;
                 rps=rps+(rx[6]-48);
                 rps=732/rps;
+                
+                        m=0;
+        while(m<6)
+        {
+            if(TXIF==1)
+            {
+                TXIF=0;
+                TXREG1=done[m++];
+            }
+        }  
+                
                 conv2=1;
            }
     }
     if(rx[0]=='S'&&rx[1]=='T'&&rx[2]=='E'&&rx[3]=='P'&&rx[4]=='C'&&rx[5]=='W'&&rx[6]==':')
         {
-                grados=(rx[7]-48)*100;
-                grados=grados+(rx[8]-48)*10;
-                grados=grados+(rx[9]-48);       
+                grados=(rx[7]-0x30)*100;
+                grados=grados+(rx[8]-0x30)*10;
+                grados=grados+(rx[9]-0x30);   
+                grados=grados*512/45;
                 g=1;
+                        m=0;
+//        while(m<6)
+//        {
+//            if(TXIF==1)
+//            {
+//                TXIF=0;
+//                TXREG1=done[m++];
+//            }
+//        }  
+                
                 conv2=1;
         }
 }
@@ -216,7 +282,6 @@ void main(void) {
             isr=0;
             j=0;
             if(ccw==1)
-             //if(rx[0]=='T'&&rx[1]=='E'&&rx[2]=='M'&&rx[3]=='P'&&rx[4]=='L'&&rx[5]=='I'&&rx[6]=='M'&&rx[7]=='I'&&rx[8]=='T')    
                 {
                    
                     PORTB=secuencia[i];
@@ -241,10 +306,61 @@ void main(void) {
 
 
         }
-        //if(on==0)clear();
-         
+//        if(on==1&&g==1&&)
+//        {
+//            g=0;
+//                            if(conv2==1)
+//                {
+//                    clear();
+//                    conv2=0;
+//                }
+//        }
+        if(on==0&&g==1)
+        {
+            unsigned char temp;
+            if(conv2==1)
+                {
+                    clear();
+                    conv2=0;
+                }
+            for(temp=0;temp<=4096;temp++)
+            {
+        if(isr==1)
+        {
+
+            isr=0;
+            j=0;
+        if(RB5==0)
+        {
+            
+        
+        PORTB=secuencia[i];
+
+        i++;
+        if(i>=7)
+        {
+         i=0;   
+        }
+        }
+        else
+        {
+        PORTB=secuencia[i];
+
+        i--;
+        if(i<=0)
+        {
+         i=7;   
+        }
 
 
+        }
+        
+        }
+
+        }
+        g=0;
+        
+    }
         
         
     }
