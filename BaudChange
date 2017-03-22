@@ -1,0 +1,258 @@
+#include <xc.h>
+#pragma config XINST = OFF //Extended Instruction Set (disabled)
+
+#define SIZE_MESSAGE 4
+#define SIZE_RESPONSE 8
+#define AT_OK "AT"
+#define BAUD4 "AT+BAUD4" //9600 baud
+#define BAUD5 "AT+BAUD5" //19200 baud
+#define BAUD6 "AT+BAUD6" //38400 baud
+#define BAUD7 "AT+BAUD7" //57600 baud
+#define BAUD8 "AT+BAUD8" //115200 baud
+
+unsigned char baud_calc[] = {207,103,51,34,16};
+unsigned char config_number = 5;
+unsigned char get_baud = 1;
+unsigned char no_baud = 0;
+unsigned char complete_reception = 0;
+unsigned char received_data[SIZE_MESSAGE];
+unsigned char ok_response[SIZE_RESPONSE];
+unsigned char index_message = 0;
+unsigned char index_baud = 0;
+unsigned char new_baud = 103;
+unsigned char ok = 0;
+
+void interrupt highPriority(void){
+    if((RC1IE == 1)&&(RC1IF == 1))
+    {
+        RC1IF = 0;
+        
+        //Code to receive the message in order to calculate the baud rate
+        if((get_baud == 1)&&(SIZE_MESSAGE >= index_message))
+        {
+            if(RCREG1 != 0x0D) //If it is not an enter
+            {
+                received_data[index_message++] = RCREG1; //Save the data received
+            }
+            else
+            {
+                complete_reception = 1; //The whole message has received
+            }
+        }
+        else if((get_baud == 1)&&(SIZE_MESSAGE < index_message))
+        {
+            complete_reception = 1; //Its not necessary to wait for the other characters 
+            no_baud = 1; //The message received does not have the length of "HOLA"
+            index_message = 0; //Reset the index counter
+        }
+        
+        if(config_number == 0)
+        {
+            ok_response[index_message++] =  RCREG1; //Save the OK response of the BT module
+            if(index_message == SIZE_RESPONSE)
+            {
+                config_number = 5;
+            }
+        }
+    }
+    
+    if((TX1IE == 1)&&(TX1IF == 1))
+    {
+        if(ok =1)
+        {
+            
+            if(AT_OK[index_baud] != 0)
+            {
+                TXREG1 = AT_OK[index_baud++];
+            }
+            else
+            {
+                TXREG1 = 0x0D;
+                ok = 0;
+                TX1IE = 0;
+            }
+        }
+        if (config_number == 1)
+        {
+            TXREG1 = BAUD4[index_baud++];
+            if(index_baud == 8) //If the message is finished 
+            {
+                TXREG1 = 0x0D; //Send an enter 
+                SPBRG1 = baud_calc[0]; //Configure the PIC with 9600 baud rate
+                config_number = 0; //Default value
+                TX1IE = 0; //Disable the transmission interrupt
+            }
+        }
+        else if(config_number == 2) 
+        {
+            TXREG1 = BAUD5[index_baud++];
+            if(index_baud == 8) //If the message is finished
+            {
+                TXREG1 = 0x0D; //Send an enter 
+                SPBRG1 = baud_calc[1]; //Configure the PIC with 19200 baud rate
+                config_number = 0; //Default value
+                TX1IE = 0; //Disable the transmission interrupt
+            }
+        }
+        else if(config_number == 3)
+        {
+            TXREG1 = BAUD6[index_baud++];
+            if(index_baud == 8) //If the message is finished
+            {
+                TXREG1 = 0x0D; //Send an enter 
+                SPBRG1 = baud_calc[2]; //Configure the PIC with 38400 baud rate
+                config_number = 0; //Default value
+                TX1IE = 0; //Disable the transmission interrupt
+            }
+        }
+        else if(config_number == 4)
+        {
+            TXREG1 = BAUD7[index_baud++];
+            if(index_baud == 8) //If the message is finished
+            {
+                TXREG1 = 0x0D; //Send an enter 
+                SPBRG1 = baud_calc[3]; //Configure the PIC with 57600 baud rate
+                config_number = 0; //Default value
+                TX1IE = 0; //Disable the transmission interrupt
+            }
+        }
+        else if(config_number == 5)
+        {
+            TXREG1 = BAUD8[index_baud++];
+            if(index_baud == 8) //If the message is finished
+            {
+                TXREG1 = 0x0D; //Send an enter 
+                SPBRG1 = baud_calc[4]; //Configure the PIC with 115200 baud rate
+                config_number = 0; //Default value
+                TX1IE = 0; //Disable the transmission interrupt
+            }
+        }
+    }
+}
+
+//Function to initialize the data buffer 
+void reset_data()
+{
+    for(int i = 0; i<SIZE_MESSAGE;i++)
+    {
+        received_data[i] = 0;
+    }
+}
+
+unsigned char checkBaud(void)
+{
+    if((received_data[0] == 0x48)&&(received_data[1] == 0x4F)&&(received_data[2] == 0x4C)&&(received_data[3] == 0x41))
+    {
+        return 1; //Return 1 if the received message is "HOLA"
+    }
+    else //If it is not "HOLA"
+    {
+        no_baud = 1; //Set as 1 the incorrect baud flag
+        reset_data(); //Clean the receiving array
+        return 0;
+    }
+}
+
+//Function to check the new baud rate to configure 
+void config_BT(void)
+{
+    switch (new_baud)
+    {
+        case 207:
+            config_number = 1; //Number for 9600 baud
+            TX1IE = 1; //Enable the transmission interrupt
+            break;
+        case 103:
+            config_number = 2; //Number for 19200 baud
+            TX1IE = 1; //Enable the transmission interrupt
+            break;
+        case 51:
+            config_number = 3; //Number for 38400 baud
+            TX1IE = 1; //Enable the transmission interrupt
+            break;
+        case 34:
+            config_number = 4; //Number for 57600 baud
+            TX1IE = 1; //Enable the transmission interrupt
+            break;
+        case 16:
+            config_number = 5; //Number for 115200 baud
+            TX1IE = 1; //Enable the transmission interrupt
+            break;
+        default:
+            break;
+    }
+}
+void get_ok()
+{
+    ok = 1;
+    TX1IE = 1;
+}
+void main(void) {
+    /*-------------------------------------Register configuration-------------------------------*/
+    /*Transmit register configuration
+     bit 7: Does not matter for asynchronous 
+     bit 6: 8-bit transmission
+     bit 5: Transmit enabled 
+     bit 4: Asynchronous mode 
+     bit 3: Transmission is completed
+     bit 2: High speed Baud Rate
+     bit 1: Transmit Shift register status (flag)
+     bit 0: 9th bit (does not matter)*/
+    TXSTA1 = 0x24;
+    /*Receive register configuration 
+     bit 7: Serial port enabled 
+     bit 6: 8-bit reception 
+     bit 5: Does not matter for asynchronous 
+     bit 4: Enables receiver
+     bit 3: Does not matter for 8-bit reception 
+     bit 2: Framing error (flag)
+     bit 1: Overrun error (flag)
+     bit 0: 9th bit (does not matter)*/
+    RCSTA1 = 0x90;
+    /*Baud Rate register configuration
+     bit 7: Auto-Baud status (flag=0)
+     bit 6: Receive activated 
+     bit 5: Not inverted data
+     bit 4: High level Idle
+     bit 3: 16-bit BRG(Baud Rate Generator)
+     bit 2: Unimplemented
+     bit 1: RX1 is not monitored 
+     bit 0: Auto-Baud disabled*/
+    BAUDCON1=0x08;
+    /*Baud Rate Generator 
+     Calculated by the equation with 0.16% of error*/
+    SPBRG1=baud_calc[index_baud];
+    
+    /*---------------------------------Interrupt configuration--------------------------------------*/
+    IPEN = 1; //Enable priority levels 
+    GIEH = 1; //Enable global high-priority interrupts
+    RC1IE = 1; //Enable reception interrupt
+    RC1IP = 1; //Reception interrupt in high-priority 
+    RC1IF = 0; //Turn off the flag (just for precaution)
+    TX1IE = 0; //Enable transmission interrupt 
+    TX1IP = 1; //Transmission interrupt in high-priority
+    get_ok();
+    while(1)
+    {
+        if((no_baud == 1)&&(get_baud == 1)&&(complete_reception == 1)) //If the incorrect baud flag is on
+        {
+            complete_reception = 0; //Reset the reception completed flag
+            no_baud = 0; //Clear the flag
+            reset_data(); //Clean the receiving array
+            SPBRG1 = baud_calc[index_baud++]; //Configure the baud register with a the next possible baud rate
+        }
+        else if ((no_baud == 0)&&(get_baud == 1)&&(complete_reception == 1))
+        {
+            complete_reception = 0; //Reset the reception completed flag
+            if(checkBaud() == 1) //If the message is "HOLA"
+            {
+                get_baud = 0; //Reset the flag to calculate the baud
+                index_baud = 0; //Reset the index to send the message configuration
+                if(new_baud != SPBRG1)
+                {
+                    config_BT(); //Configure the BT module
+                }
+            }
+        }
+    }
+}
