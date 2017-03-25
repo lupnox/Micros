@@ -1,0 +1,497 @@
+#include <xc.h>
+#pragma config XINST = OFF //Extended Instruction Set (disabled)
+
+#define SIZE_COM  9 //Set as 9 because of the biggest command to receive 
+#define SIZE_DATA  5 //Set as 5 because of the biggest data to receive 
+
+
+/*David variables */
+
+unsigned int secuencia[] = {0x07, 0x03, 0x0B, 0x09, 0x0D, 0x0C, 0x0E, 0x06};
+unsigned char i = 0;
+unsigned char j = 0;
+unsigned char k = 0, l = 0, m = 0, g = 0,overTemperature=0;
+unsigned char isr = 0;
+
+/*mario variables */
+unsigned char CWF = 0; //Clockwise flag
+unsigned char ONF = 0; //On/Off flag
+unsigned char CRF = 0; //Command received flag
+unsigned char CFTF = 0; //Full transfer flag 
+
+unsigned char command[SIZE_COM]; //Command array
+unsigned char data[SIZE_DATA]; //Data array
+unsigned char index = 0;
+unsigned char data_invalid = 0; //Flag to check if the data received is invalid
+unsigned char zeros = 0,cont5s=0; //number of null values in the arrays
+unsigned int number_data; //Variable to keep the number received
+unsigned int velocity, degrees, temperature=9999, n = 0,cont1s=0,TActual; //RPS,STEP,TEMP
+//variables erick
+unsigned char msg1[]={68, 79, 9, 13, 10};
+unsigned char msg2[]={79,86,69,82,84,69,77,80,69,82,65,84,85,82,69,32,68,68,69,84,69,67,84,69,68,33,13,10};
+unsigned char msg_temp[3];
+unsigned char temperatura[]={"   . \n"};
+unsigned char OverTemperatureDetected[]={"Overtemperature detected\n"};
+unsigned char warning=0;
+unsigned char cursor=0,LED;
+unsigned char done[]={"DONE\n"}; 
+unsigned int lecturaT;
+
+/////
+
+void high_priority interrupt Highpriority(void) {
+
+    /* David timer */
+
+    if (TMR0IE && TMR0IF) {
+
+        TMR0L = 56;
+        TMR0IF = 0;
+        //GO_DONE = 1;
+        j++;
+        cont1s++;
+        if (j >= (velocity))//tiempo minimo de 600us por paso, 600us*4096pasos=2.4576segundos por revolución velocidad máxima
+            //if(j>=61)
+        {
+
+            isr = 1;
+        }
+        if(cont1s>=5000){
+      //RBx (led)e toggle
+           // RA1 = 0;
+      cont1s=0;
+      cont5s++;
+             LED=!LED;
+    }
+    if(cont5s>=5){
+ 
+      GO_DONE=1;
+      cont5s=0;
+    }
+    }
+
+    /*Reception interrupt*/
+
+if ((RC1IF == 1)&&(RC1IE == 1)) {
+        RC1IF = 0;
+        if ((CRF == 0)&&(SIZE_COM >= index)&&(RCREG1 != 0x0A)) {
+            if ((RCREG1 != 0x3A) && (SIZE_COM > index)) {
+                command[index++] = RCREG1;
+            }
+            else if ((RCREG1 == 0x3A)&&(SIZE_COM >= index)) {
+                CRF = 1;
+                index = 0;
+            } else {
+                data_invalid = 1; //Edited
+            }
+        } else if (RCREG1 != 0x0A) {
+            if ((RCREG1 != 0x0D)&&(SIZE_DATA > index)) {
+                data[index++] = RCREG1;
+            } else if ((index == SIZE_DATA)&&(RCREG1 != 0x0D)) {
+                data_invalid = 1;
+            } else if (RCREG1 == 0x0D) {
+                index = 0;
+                CRF = 0;
+                CFTF = 1;
+            }
+        }
+    }
+}
+
+void low_priority interrupt adc(void) {
+if(ADIE&&(ADIF))
+    {
+    ADIF=0;
+    lecturaT=ADRESH;
+        lecturaT=(unsigned long)lecturaT*9999/255;
+        TActual=lecturaT;
+        for(char y=5;y>0;y--){
+            if(y!=4){
+                
+            
+          temperatura[y-1]=(lecturaT%10)+0x30;
+          lecturaT=lecturaT/10;
+                    }
+        warning=3;
+        TXIE=1;
+                            }
+        if(TActual>temperature)
+            {
+
+            ONF=0;
+            g=0;
+            degrees=0;
+            overTemperature=1;
+            warning=4;
+            TX1IE = 1;
+            }
+                if(TActual<temperature)
+            {
+            overTemperature=0;
+
+            }
+
+
+
+    }
+if(TX1IE==1&&TX1IF==1){
+  if(warning==1){
+
+
+    TXREG1=done[cursor++];
+      
+    if(cursor>5){
+      TX1IE=0;
+      cursor=0;
+      warning=0;
+    }
+  }
+  else if(warning==2){
+    TXREG1=msg1[cursor++];
+    if(cursor>26){
+      TX1IE=0;
+      cursor=0;
+      warning=0;
+    }
+  }
+    else if(warning==3){
+    TXREG=temperatura[cursor++];
+    if(cursor>5){
+      TXIE=0;
+      cursor=0;
+      warning=0;
+    }
+  }
+      else if(warning==4){
+    TXREG=OverTemperatureDetected[cursor++];
+    if(cursor>24){
+      TXIE=0;
+      cursor=0;
+      warning=0;
+    }
+  }
+
+  else{
+    TX1IE=0;
+    cursor=0;
+    warning=0;
+  }
+    
+}
+
+}
+
+
+//Function to initialize the command buffer 
+
+void reset_command() {
+    for (int i = 0; i < SIZE_COM; i++) {
+        command[i] = 0;
+    }
+}
+//Function to initialize the data buffer 
+
+void reset_data() {
+    for (int i = 0; i < SIZE_DATA; i++) {
+        data[i] = 0;
+    }
+}
+
+void get_zeros(unsigned char command_zeros) {
+    zeros = 0;
+    if (command_zeros == 1) {
+        for (int i = 0; i < SIZE_COM; i++) {
+            if (command[i] == 0) {
+                zeros++;
+            }
+        }
+    }
+    else {
+        for (int i = 0; i < SIZE_DATA; i++) {
+            if (data[i] == 0) {
+                zeros++;
+            }
+        }
+    }
+}
+
+unsigned char valid_intdata() {
+    if (data_invalid == 1) {
+        data_invalid = 0;
+        reset_data();
+        return 0;
+    }
+
+    for (int i = 0; i < SIZE_DATA; i++) {
+        if (i != 3) {
+            if ((data[i] > 0x39)&&(data[i] < 0x30)) {
+                return 0;
+            }
+        } else {
+            if (data[i] != 0x2E) {
+                reset_data();
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+unsigned int get_data() {
+    unsigned int data_number = 0;
+    data_number += ((data[0] - 0x30)*1000);
+    data_number += ((data[1] - 0x30)*100);
+    data_number += ((data[2] - 0x30)*10);
+    data_number += (data[4] - 0x30);
+    return data_number;
+}
+
+void validation(void) {
+    CFTF = 0;
+    get_zeros(1);
+    if ((command[0] == 0x52)&&(command[1] == 0x50)&&(command[2] == 0x53)&&(zeros == 6))//RPS
+    {
+        if (valid_intdata() == 1) {
+            number_data = get_data();
+            warning=1;
+            TX1IE = 1;
+               
+            if (number_data <= 999) {
+                velocity = number_data;
+                velocity = 732 / velocity;
+            }
+        }
+    } else if ((command[0] == 0x44)&&(command[1] == 0x49)&&(command[2] == 0x52)&&(zeros == 6))//DIR
+    {
+        get_zeros(0);
+        if ((data[0] == 0x43) && (data[1] == 0x57) && (zeros == 3)) {
+            CWF = 1;
+                        warning=1;
+            TX1IE = 1;
+
+        } else if ((data[0] == 0x43) && (data[1] == 0x43) && (data[2] == 0x57) && (zeros == 2)) {
+            CWF = 0;
+                        warning=1;
+            TX1IE = 1;
+
+        }
+    } else if ((command[0] == 0x4D)&&(command[1] == 0x4F)&&(command[2] == 0x54)&&(command[3] == 0x4F)&&(command[4] == 0x52)&&(zeros == 4))//MOTOR
+    {
+        get_zeros(0);
+        if ((data[0] == 0x4F) && (data[1] == 0x4E) && (zeros == 3)) {
+            ONF = 1;
+                        warning=1;
+            TX1IE = 1;
+
+        } else if ((data[0] == 0x4F) && (data[1] == 0x46) && (data[2] == 0x46) && (zeros == 2)) {
+            ONF = 0;
+                        warning=1;
+            TX1IE = 1;
+
+        }
+    } else if ((command[0] == 0x53)&&(command[1] == 0x54)&&(command[2] == 0x45)&&(command[3] == 0x50)&&(command[4] == 0x43)&&(command[5] == 0x57)&&(zeros == 3)&&ONF==0)//STEPCW
+    {
+        if (valid_intdata() == 1) {
+            g = 1;
+            CWF = 1;
+                        warning=1;
+            TX1IE = 1;
+
+            number_data = get_data();
+            if (number_data <= 9990) {
+                degrees = ((unsigned long)number_data / 10)*448 / 45;
+
+            }
+        }
+    } else if ((command[0] == 0x53)&&(command[1] == 0x54)&&(command[2] == 0x45)&&(command[3] == 0x50)&&(command[4] == 0x43)&&(command[5] == 0x43)&&(command[6] == 0x57)&&(zeros == 2)&&ONF==0)//STEPCCW
+    {
+        if (valid_intdata() == 1) {
+            g = 1;
+            CWF = 0;
+                        warning=1;
+            TX1IE = 1;
+
+            number_data = get_data();
+            if (number_data <= 9990) {
+                degrees = ((unsigned long)number_data / 10)*448 / 45;
+            }
+        }
+    } else if ((command[0] == 'T')&&(command[1] == 'E')&&(command[2] == 'M')&&(command[3] == 'P')&&(command[4] == 'L')&&(command[5] == 'I')&&(command[6] == 'M')&&(command[7] == 'I')&&(command[8] == 'T'))//TEMPLIMIT
+    {
+        if (valid_intdata() == 1) {
+                        warning=1;
+            TX1IE = 1;
+
+            number_data = get_data();
+            if (number_data <= 9999) {
+                temperature = number_data;
+            }
+        }
+    }
+    reset_data();
+    reset_command();
+}
+
+void main(void) {
+    /*-------------------------------------Register configuration-------------------------------*/
+    /*Transmit register configuration
+     bit 7: Does not matter for asynchronous 
+     bit 6: 8-bit transmission
+     bit 5: Transmit enabled 
+     bit 4: Asynchronous mode 
+     bit 3: Transmission is completed
+     bit 2: Low speed Baud Rate
+     bit 1: Transmit Shift register status (flag)
+     bit 0: 9th bit (does not matter)*/
+    TXSTA1 = 0x20;
+   // TXSTA=0b00101100;
+    /*Receive register configuration 
+     bit 7: Serial port enabled 
+     bit 6: 8-bit reception 
+     bit 5: Does not matter for asynchronous 
+     bit 4: Enables receiver
+     bit 3: Does not matter for 8-bit reception 
+     bit 2: Framing error (flag)
+     bit 1: Overrun error (flag)
+     bit 0: 9th bit (does not matter)*/
+    RCSTA1 = 0x90;
+    /*Baud Rate register configuration
+     bit 7: Auto-Baud status (flag=0)
+     bit 6: Receive activated 
+     bit 5: Not inverted data
+     bit 4: High level Idle
+     bit 3: 8-bit BRG(Baud Rate Generator)
+     bit 2: Unimplemented
+     bit 1: RX1 is not monitored 
+     bit 0: Auto-Baud disabled*/
+    BAUDCON1 = 0;
+    /*Baud Rate Generator 
+     Calculated by the equation with 0.16% of error*/
+    SPBRG1 = 12;
+    TRISA1 = 0;
+    /*---------------------------------Interrupt configuration--------------------------------------*/
+    IPEN = 1; //Enable priority levels 
+    GIEH = 1; //Enable global high-priority interrupts
+    GIEL=1;
+    GIE=1;
+    RC1IE = 1; //Enable reception interrupt
+    RC1IP = 1; //Reception interrupt in high-priority 
+    RC1IF = 0; //Turn off the flag (just for precaution)
+    RA1 = 1;
+
+
+    /* David config*/
+TX1IE = 0;
+TX1IP = 0;
+
+    TMR0IP = 1; //Configura prioridad alta para TRM0
+    TMR0IE = 1; //Habilita interrupción para TMR0
+    TMR0IF = 1; //OVERFLOW
+
+    T0CON = 0xC0; //2:1, 200us para la interrupción,
+    TMR0L = 56;
+
+
+    ANSEL8 = 0;
+    ANSEL10 = 0;
+    ANSEL9 = 1;
+    ANSEL1=0;
+
+
+
+    ADIF = 1; ///CONVERTION COMPLETED
+    ADIE = 1; //ENABLE INTERRUPT
+    ADIP = 0; //0=LOW PRIORITY, 1=HIGH PRIORITY
+    ADCON0 = 0b00100100;
+    ADCON1 = 0;
+    ADCON2 = 0b00001001;
+    ADON = 1; //PRENDER ADC
+
+
+    TRISB = 0xF0;
+    TRISA=0x00;
+    //RA1 = 0;
+ 
+    while (1) {
+        if(LED==1)
+        PORTA=0x01;
+        if(LED==0)
+        PORTA=0x00;    
+        if (CFTF == 1) {
+            validation();
+            
+        }
+        if(RB5==1)
+        {
+            warning=5;
+            TX1IE = 1;    
+        }
+
+        /*David motor flag checking */
+        if (isr == 1 && ONF == 1) {
+
+            isr = 0;
+            j = 0;
+            if (CWF == 0) {
+
+                PORTB = secuencia[i];
+                i++;
+                if (i >= 7) {
+                    i = 0;
+                }
+            } else {
+                PORTB = secuencia[i];
+                i--;
+                if (i <= 0) {
+                    i = 7;
+                }
+
+
+            }
+
+        }
+        /////////
+        if (ONF == 1 && g == 1) {
+            g = 0;
+
+        }
+        if (ONF == 0 && g == 1 && overTemperature==0) {
+            g = 0;
+            n = 0;
+            //3584
+            while (n < degrees) {
+                if (isr == 1) {
+
+                    isr = 0;
+                    j = 0;
+                    if (CWF == 0) {
+
+
+                        PORTB = secuencia[i];
+
+                        i++;
+                        if (i >= 7) {
+                            i = 0;
+                        }
+                    } else {
+                        PORTB = secuencia[i];
+
+                        i--;
+                        if (i <= 0) {
+                            i = 7;
+                        }
+
+
+                    }
+                    n++;
+                }
+
+            }
+
+            n = 0;
+
+        }
+        ////////
+
+    }
+}
