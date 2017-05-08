@@ -1,0 +1,554 @@
+#include <xc.h>
+#include "configuration_bits.h"
+
+#define SIZE_COM  1 //Set as 9 because of the biggest command to receive 
+#define SIZE_DATA  5 //Set as 5 because of the biggest data to receive 
+
+unsigned int measure = 0; //Variable to measure the cable 
+unsigned int length_cable = 0; //Desired lenght of cable 
+unsigned char gauge_cable = 0; //Gauge of the cable (12-22)
+unsigned char zeros = 0; //number of null values in the arrays
+unsigned char index = 0; 
+unsigned char cursor=0;
+unsigned int number_data; //Variable to keep the number received
+unsigned char done[]={"DONE\n"}; //Done response 
+unsigned char command[SIZE_COM]; //Command array
+unsigned char data[SIZE_DATA] ; //Data array
+unsigned char CRF = 0; //Command received flag
+unsigned char CFTF = 0; //Full transfer flag 
+unsigned char data_invalid = 0; //Flag to check if the data received is invalid
+unsigned char limit_r = 0; //Flag to check if the right limit was defined
+unsigned long position_right = 0; //Variable to keep the right limit
+unsigned long position_left = 0; //Variable to keep the left limit 
+unsigned long position = 0; //Variable to keep the actual position of the stepper
+unsigned char start_process = 0; //Flag to check if the process should start  
+unsigned char next_step = 0; //Next step on the sequence of the motor
+unsigned int velocity = 5000; //Velocity of the sequence depending on the gauge of the cable (default 30000)
+unsigned int counter = 0;//Counter for the TMR0
+unsigned int secuencia[]={0x0C, 0x06, 0x03, 0x09,0x0C, 0x06, 0x03, 0x09}; //Sequence for stepper
+unsigned char i = 0; //Index for the sequence
+unsigned char m =0;
+unsigned char reach_right = 0; //Flag to check if the stepper reach the right limit
+unsigned char reach_left = 0; //Flag to check if the stepper reach the left limit
+unsigned int cuenta;
+unsigned char second_velocity = 0;
+unsigned char start_program = 0;
+
+
+void reset_program();
+void init_config();
+void init_program();
+void move_right();
+void move_left();
+void get_zeros(unsigned char command_zeros);
+void reset_command();
+void reset_data();
+void validation();
+unsigned char valid_intdata();
+unsigned int get_data();
+unsigned char define_limits();
+void stopAnalogSignal();
+void startAnalogSignal();
+void delay();
+
+void interrupt highPriority()
+{       
+    if((INT1IE == 1) && (INT1IF == 1))
+    {
+        INT1IF = 0;
+        measure++; //Sum all the pulses of the encoder
+    }
+    
+    //Receive the commands from the BLE
+    if ((RC1IF == 1)&&(RC1IE == 1)) 
+    {
+        RC1IF = 0;
+        if ((CRF == 0)&&(SIZE_COM >= index)&&(RCREG1 != 0x0A)) 
+        {
+            if ((RCREG1 != 0x3A) && (SIZE_COM > index)) 
+            {
+                command[index++] = RCREG1;
+            }
+            else if ((RCREG1 == 0x3A)&&(SIZE_COM >= index)) 
+            {
+                CRF = 1;
+                index = 0;
+            } 
+            else 
+            {
+                data_invalid = 1; //Edited
+            }
+        } 
+        else if (RCREG1 != 0x0A) 
+        {
+            if ((RCREG1 != 0x0D)&&(SIZE_DATA > index)) 
+            {
+                data[index++] = RCREG1;
+            } 
+            else if ((index == SIZE_DATA)&&(RCREG1 != 0x0D)) 
+            {
+                data_invalid = 1;
+            } 
+            else if (RCREG1 == 0x0D) 
+            {
+                index = 0;
+                CRF = 0;
+                CFTF = 1;
+            }
+        }
+    }
+    
+    //Send a done response by BLE to verify
+    if((TX1IE == 1)&& (TX1IF == 1))
+    {
+        TXREG1=done[cursor++];
+        if(cursor>5)
+        {
+            TX1IE=0;
+            cursor=0;
+        }
+    }
+}
+
+void main(void) {
+    init_config(); //Initial configurations 
+    init_program(); //Initialize the whole program
+    LATC1 = 0;
+    startAnalogSignal();
+    while(1)
+    {
+        if(measure <= (length_cable-20)) //Stop it when the cable has reach the desired length
+        {
+            //if(next_step==1)
+            //{     
+            delay();
+                
+                counter=0;
+                if((position_left >= position) && (reach_left == 0))
+                {
+                    if(position_left != position)
+                    {
+                        move_left();
+                    }
+                    else
+                    {
+                        if(second_velocity == 0)
+                        {
+                            LATB4 = 0; //Analog Signal disabled
+                            LATB2 = 0; //Reference 1 enabled 
+                            LATB3 = 1; //Reference 2 disabled
+                        }
+                        reach_left = 1;
+                        reach_right = 0;
+                    }
+                }
+                else if((position_right <= position)&&(reach_right == 0))
+                {
+                    if(position_right != position)
+                    {
+                        LATB4 = 0; //Analog Signal disabled
+                        LATB2 = 1; //Reference 1 enabled 
+                        LATB3 = 0; //Reference 2 disabled
+                        second_velocity = 1;
+                        move_right();
+                    } 
+                    else
+                    {
+                        reach_right = 1;
+                        reach_left = 0;
+                    }
+                }
+           // }
+        }
+        else if ((measure > (length_cable-20))&&(measure <= length_cable))
+        {
+            second_velocity = 0;
+            LATB4 = 0; //Analog Signal disabled
+            LATB2 = 0; //Reference 1 enabled 
+            LATB3 = 1; //Reference 2 disabled
+
+            delay();
+                next_step=0;
+                counter=0;
+                if((position_left >= position) && (reach_left == 0))
+                {
+                    if(position_left != position)
+                    {
+                        move_left();
+                    }
+                    else
+                    {
+                        reach_left = 1;
+                        reach_right = 0;
+                    }
+                }
+                else if((position_right <= position)&&(reach_right == 0))
+                {
+                    if(position_right != position)
+                    {
+                       move_right();
+                    } 
+                    else
+                    {
+                        reach_right = 1;
+                        reach_left = 0;
+                    }
+                }
+            } 
+            else
+            {
+                stopAnalogSignal();
+            }
+        }
+    }
+
+void delay(){
+      /*Configuration of the timer to run as properly for our application
+       Timer enabled
+       8-bit timer configured
+       Internal instruction cycle clock
+       low-to-high transition
+       prescaler assigned
+       1:8 prescaler value (to get 1 micro-seconds for every change in the timer)*/
+    if((second_velocity == 1) && (start_program == 1))
+    {
+        cuenta=velocity;
+    }
+    else 
+    {
+        cuenta = 7000;
+    }
+    TMR0L=0;
+       T0CON=0x80;       
+       while(TMR0<=cuenta){}
+       T0CON=0;
+       TMR0=0;
+  }
+
+void init_config()
+{
+    /*-------------------------------------Register configuration-------------------------------*/
+    /*Transmit register configuration
+     bit 7: Does not matter for asynchronous 
+     bit 6: 8-bit transmission
+     bit 5: Transmit enabled 
+     bit 4: Asynchronous mode 
+     bit 3: Transmission is completed
+     bit 2: Low speed Baud Rate
+     bit 1: Transmit Shift register status (flag)
+     bit 0: 9th bit (does not matter)*/
+    TXSTA1 = 0x20;
+    /*Receive register configuration 
+     bit 7: Serial port enabled 
+     bit 6: 8-bit reception 
+     bit 5: Does not matter for asynchronous 
+     bit 4: Enables receiver
+     bit 3: Does not matter for 8-bit reception 
+     bit 2: Framing error (flag)
+     bit 1: Overrun error (flag)
+     bit 0: 9th bit (does not matter)*/
+    RCSTA1 = 0x90;
+    /*Baud Rate register configuration
+     bit 7: Auto-Baud status (flag=0)
+     bit 6: Receive activated 
+     bit 5: Not inverted data
+     bit 4: High level Idle
+     bit 3: 8-bit BRG(Baud Rate Generator)
+     bit 2: Unimplemented
+     bit 1: RX1 is not monitored 
+     bit 0: Auto-Baud disabled*/
+    BAUDCON1=0;
+    /*Baud Rate Generator 
+     Calculated by the equation with 0.16% of error*/
+    SPBRG1=12;
+    
+    /*-----------------------------------Timer0 configuration---------------------------------------------*/
+    //T0CON=0x80;//Interrupt every 1us
+    
+    /*---------------------------------Interrupt configuration--------------------------------------*/
+    IPEN = 1; //Enable priority levels 
+    GIEH = 1; //Enable global high-priority interrupts
+    RC1IE = 1; //Enable reception interrupt
+    RC1IP = 1; //Reception interrupt in high-priority 
+    RC1IF = 0; //Turn off the flag (just for precaution)
+    INT1IE = 1; //Enable the external interrupt (High priority default)
+    INT1IP = 1; //Interrupt high priority
+    INT1IF = 0; //Turn off the flag for the external interrupt (RB0)
+    
+    /*----------------------------------Pin configuration-----------------------------------------------*/
+    TRISB2 = 0; //Analog Signal control 1
+    TRISB3 = 0; //Analog Signal control 2 
+    TRISB4 = 0; //Analog Signal control enable 
+    TRISC5 = 1; //Define limits
+    TRISC4 = 1; //Move to right 
+    TRISC3 = 1; //Move to left
+    TRISB1 = 1; //External interrupt 
+    TRISA = 0; //Stepper
+    TRISC1 = 0; //Process LED
+    TRISC2 = 1; //Start limit
+    TRISB0 = 1; //Start Process
+    
+    /*----------- Output as digital ------------------------------*/
+    ANSEL0 = 0;
+    ANSEL1 = 0;
+    ANSEL2 = 0;
+    ANSEL3 = 0;
+    ANSEL8 = 0;
+    ANSEL9 = 0;
+    ANSEL10 = 0;
+    
+    LATB4 = 1; //Analog Signal disabled
+    LATB2 = 1; //Reference 1 enabled 
+    LATB3 = 1; //Reference 2 disabled
+    LATC1 = 1; //LED off
+}
+
+void startAnalogSignal()
+{
+    if(measure <= length_cable) //Stop it when the cable has reach the desired length
+        {  
+            LATB4 = 0; //Analog Signal enabled
+            LATB2 = 1; 
+            LATB3 = 1;
+            delay();
+                counter=0;
+                
+                if((position_left >= position) && (reach_left == 0))
+                {
+                    if(position_left != position)
+                    {
+                        move_left();
+                    }
+                    else
+                    {
+                        reach_left = 1;
+                        reach_right = 0;
+                    }
+                }
+        }
+}
+
+void stopAnalogSignal()
+{
+    LATB2 = 1;
+    LATB3 = 1;
+    LATB4 = 1; //Analog Signal disabled
+}
+
+void init_program()
+{
+    while(RC2 == 1) //While the mechanism does not touch the start limit
+    {
+               LATAbits.LA0=0;
+                LATAbits.LA1=0;
+                LATAbits.LA2=1;
+                LATAbits.LA3=1;
+        delay();
+                LATAbits.LA0=0;
+                LATAbits.LA1=1;
+                LATAbits.LA2=1;
+                LATAbits.LA3=0;
+        delay();
+                LATAbits.LA0=1;
+                LATAbits.LA1=1;
+                LATAbits.LA2=0;
+                LATAbits.LA3=0;
+        delay();
+        LATAbits.LA0=1;
+        LATAbits.LA1=0;
+        LATAbits.LA2=0;
+        LATAbits.LA3=1;
+        delay();
+    }
+    
+    position = 0; //Start position
+    
+        while((gauge_cable == 0) || (length_cable == 0)) //Wait for the commands to change the cable info 
+    {
+        if(CFTF == 1) //If the whole command was received 
+        {
+            validation(); //validate it
+        }
+    }
+    
+    velocity = 7000 + (((7000-5000)/(22-12))*(gauge_cable-12)); //Interpolation
+            
+    while(define_limits() == 0){} //Wait until the user define the limits 
+    
+    while(PORTBbits.RB0 == 0)
+    {
+        start_program = 1;
+        velocity = 7000;
+    } //Wait for the user to press the start button 
+}
+
+unsigned char define_limits()
+{
+    if(RC4 == 1)
+    {
+        delay();
+        move_right(); //move the stepper to the right 
+        
+    } 
+    else if ((RC3 == 1)&&(position != 0))
+    {
+        delay();
+        move_left(); //move the stepper to the left 
+    } 
+    
+    if(RC5 == 0)
+    {
+        if(limit_r == 0) //If the right limit was not defined 
+        {
+            limit_r = 1; 
+            position_right = position; //Set the actual position as the right limit 
+            for(int x = 0; x<=500; x++)
+    {
+        delay();
+    }
+        }
+        else
+        {
+            position_left = position; //Set the actual position as the left limit
+            return 1;
+        }
+    }
+    return 0;
+}
+
+void move_right()
+{
+    if(m == 0xFF)
+    {
+        m=7;   
+    }
+    LATA=secuencia[m];
+    m--;
+    position--;
+}
+
+void move_left()
+{
+   position++;
+    LATA=secuencia[m];
+    m++;
+    if(m>7)
+    {
+        m=0;   
+    }
+}
+
+void get_zeros(unsigned char command_zeros)
+{
+    zeros = 0;
+    if(command_zeros == 1)
+    {
+        for(int i=0;i<SIZE_COM;i++)
+        {
+            if(command[i]== 0)
+            {
+                zeros++;
+            }
+        }
+    } 
+    else 
+    {
+        for(int i=0;i<SIZE_DATA;i++)
+        {
+            if(data[i]== 0)
+            {
+                zeros++;
+            }
+        }       
+    }
+}
+
+//Function to initialize the command buffer 
+void reset_command()
+{
+    for(int i = 0; i<SIZE_COM;i++)
+    {
+        command[i] = 0;
+    }
+}
+//Function to initialize the data buffer 
+void reset_data()
+{
+    for(int i = 0; i<SIZE_DATA;i++)
+    {
+        data[i] = 0;
+    }
+}
+
+
+void validation()
+{
+    CFTF = 0;
+    get_zeros(1);
+    if(command[0] == 0x47)//G (gauge)
+    {
+        if(valid_intdata() == 1)
+        {
+            number_data = get_data();
+            TX1IE = 1;
+            if(number_data <= 9999)
+            {
+                gauge_cable = number_data/100;   
+            }
+        }
+    }
+    else if (command[0] == 0x4C)//L (Length)
+    {
+        if(valid_intdata() == 1)
+        {
+            number_data = get_data();
+            TX1IE = 1;
+            if(number_data <= 9999)
+            {
+                length_cable = (number_data/100)*86;   
+            }
+        }
+    }
+    reset_data();
+    reset_command();
+}
+
+unsigned char valid_intdata()
+{
+    if(data_invalid == 1)
+    {
+        data_invalid = 0;
+        reset_data();
+        return 0;
+    }
+
+    for(int i=0;i<SIZE_DATA;i++)
+    {
+        if(i != 3)
+        {
+            if((data[i]>0x39)&&(data[i]<0x30))
+            {
+                return 0;
+            }
+        }
+        else
+        {
+            if(data[i] != 0x2E)
+            {
+                reset_data();
+                return 0;
+            }
+        }
+    }
+    return 1;
+}
+
+unsigned int get_data()
+{
+    unsigned int data_number = 0;
+    data_number += ((data[0]-0x30)*1000);
+    data_number += ((data[1]-0x30)*100);
+    data_number += ((data[2]-0x30)*10);
+    data_number += (data[4]-0x30);
+    return data_number;
+}
