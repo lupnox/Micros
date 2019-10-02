@@ -1,0 +1,88 @@
+/*
+ * File:   newmain.c
+ * Author: David Olide
+ *
+ * Created on 3 de febrero de 2017, 12:16 PM
+ */
+//512 pulsos por reveolución
+
+#include <xc.h>
+#include"pic18f25k80.h"
+#include"configuration_bits.h"
+unsigned int secuencia[]={0x07, 0x03, 0x0B, 0x09, 0x0D, 0x0C, 0x0E, 0x06};
+unsigned char k=0;
+unsigned char isr=1;
+void interrupt delay(void)
+{
+    unsigned int i=0;
+    
+
+    //for(i=0;i<1000;i++)
+    
+    for(i=0;i<1;i++)
+    {    
+    T0CON=0xC2;
+    TMR0L=20;
+    do{}while(TMR0IF==0);
+    isr=1;
+    TMR0IF=0;
+    TMR0ON=0;
+    }
+}   
+    void inicializaciones(void)
+{
+    ANSEL8=0;
+    ANSEL10=0;
+    
+    ADCON0=0b00100100;
+    ADCON1=0;
+    ADCON2=0b00010001;
+    
+    ADON=1;//PRENDER ADC
+    
+    TRISB=0xF0;
+    
+    T0CON=0xC2;
+    TMR0L=20;
+    IPEN=1;	//Habilita niveles de interrupcion
+    GIEH=1;   	//Habilita interrupcion de alta prioridad
+    TMR0IP=1;   //Configura prioridad alta para TRM0
+    TMR0IE=1;   //Habilita interrupción para TMR0
+    
+}
+
+void main(void) {
+    inicializaciones();
+
+    unsigned int voltaje;
+    
+    while(1)
+    {
+        GO_DONE=1;
+        voltaje=ADRESH;
+    if(isr==1)   
+    {
+        isr=0;
+        if(RB5==0)
+        {
+            PORTB=secuencia[k];
+            k--;
+
+            if(k<=0)
+            {
+                k=7;
+            }
+        }
+        else
+        {
+            PORTB=secuencia[k];
+            k++;
+
+            if(k>=7)
+            {
+                k=0;
+            }    
+        }
+    }
+    }
+}
